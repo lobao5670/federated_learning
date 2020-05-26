@@ -14,26 +14,16 @@ from syft.frameworks.torch.fl import utils
 
 logger = logging.getLogger(__name__)
 
-LOG_INTERVAL = 25
+LOG_INTERVAL = 3
 
 
-class Net(nn.Module):
+class BreastCancerNet(nn.Module):
     def __init__(self):
-        super(Net, self).__init__()
-        self.conv1 = nn.Conv2d(1, 20, 5, 1)
-        self.conv2 = nn.Conv2d(20, 50, 5, 1)
-        self.fc1 = nn.Linear(4 * 4 * 50, 500)
-        self.fc2 = nn.Linear(500, 10)
+        super(BreastCancerNet, self).__init__()
+        self.fc = nn.Linear(30, 1)
 
     def forward(self, x):
-        x = f.relu(self.conv1(x))
-        x = f.max_pool2d(x, 2, 2)
-        x = f.relu(self.conv2(x))
-        x = f.max_pool2d(x, 2, 2)
-        x = x.view(-1, 4 * 4 * 50)
-        x = f.relu(self.fc1(x))
-        x = self.fc2(x)
-        return f.log_softmax(x, dim=1)
+        return torch.sigmoid(self.fc(x))
 
 
 def train_on_batches(worker, batches, model_in, device, lr):
@@ -63,7 +53,7 @@ def train_on_batches(worker, batches, model_in, device, lr):
         data, target = data.to(device), target.to(device)
         optimizer.zero_grad()
         output = model(data)
-        loss = f.nll_loss(output, target)
+        loss = f.binary_cross_entropy(output, target)
         loss.backward()
         optimizer.step()
         if batch_idx % LOG_INTERVAL == 0:
@@ -113,7 +103,7 @@ def get_next_batches(fdataloader: sy.FederatedDataLoader, nr_batches: int):
 
 
 def train(
-    model, device, federated_train_loader, lr, federate_after_n_batches, abort_after_one=False
+        model, device, federated_train_loader, lr, federate_after_n_batches, abort_after_one=False
 ):
     model.train()
 
@@ -157,8 +147,8 @@ def test(model, device, test_loader):
         for data, target in test_loader:
             data, target = data.to(device), target.to(device)
             output = model(data)
-            test_loss += f.nll_loss(output, target, reduction="sum").item()  # sum up batch loss
-            pred = output.argmax(1, keepdim=True)  # get the index of the max log-probability
+            test_loss += f.binary_cross_entropy(output, target, reduction="sum").item()  # sum up batch loss
+            pred = output >= 0.5  # get the index of the max log-probability
             correct += pred.eq(target.view_as(pred)).sum().item()
 
     test_loss /= len(test_loader.dataset)
@@ -176,15 +166,15 @@ def define_and_get_arguments(args=sys.argv[1:]):
     parser = argparse.ArgumentParser(
         description="Run federated learning using websocket client workers."
     )
-    parser.add_argument("--batch_size", type=int, default=64, help="batch size of the training")
+    parser.add_argument("--batch_size", type=int, default=8, help="batch size of the training")
     parser.add_argument(
         "--test_batch_size", type=int, default=1000, help="batch size used for the test data"
     )
-    parser.add_argument("--epochs", type=int, default=2, help="number of epochs to train")
+    parser.add_argument("--epochs", type=int, default=10, help="number of epochs to train")
     parser.add_argument(
         "--federate_after_n_batches",
         type=int,
-        default=50,
+        default=10,
         help="number of training steps performed on each remote worker " "before averaging",
     )
     parser.add_argument("--lr", type=float, default=0.01, help="learning rate")
